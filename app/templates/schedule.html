@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+{% block title %}Schedule – AI Roster System{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h4 class="mb-0 fw-bold"><i class="bi bi-calendar3 me-2"></i>Roster Schedule</h4>
+      <p class="text-muted small mb-0" id="scheduleSubtitle">Select parameters and generate.</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm" id="btnSimulate" onclick="runSimulation()">
+        <i class="bi bi-play-circle me-1"></i>Simulate
+      </button>
+      <button class="btn btn-generate" id="btnGenerate" onclick="generateSchedule()">
+        <i class="bi bi-magic me-1"></i>Generate Schedule
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Left: Filters -->
+    <div class="col-lg-3">
+      <div class="card filter-sidebar">
+        <div class="card-header"><i class="bi bi-funnel me-2"></i>Parameters</div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">Start Date</label>
+            <input type="date" class="form-control form-control-sm" id="startDate" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">End Date</label>
+            <input type="date" class="form-control form-control-sm" id="endDate" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Departments</label>
+            <div id="deptChecks" class="d-flex flex-column gap-1 small"></div>
+          </div>
+          <hr />
+          <div class="mb-3">
+            <label class="form-label">View Mode</label>
+            <div class="btn-group w-100" role="group">
+              <button class="btn btn-sm btn-outline-secondary active" id="btnCalView" onclick="setView('calendar')">
+                <i class="bi bi-calendar3"></i> Calendar
+              </button>
+              <button class="btn btn-sm btn-outline-secondary" id="btnTableView" onclick="setView('table')">
+                <i class="bi bi-table"></i> Table
+              </button>
+            </div>
+          </div>
+          <div class="d-grid gap-2 mt-3">
+            <button class="btn btn-sm btn-outline-success" onclick="exportCSV()">
+              <i class="bi bi-filetype-csv me-1"></i>Export CSV
+            </button>
+            <button class="btn btn-sm btn-outline-primary" onclick="exportExcel()">
+              <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Content -->
+    <div class="col-lg-9">
+      <!-- Stats strip -->
+      <div class="row g-2 mb-3" id="schedStatsRow" style="display:none!important">
+        <div class="col-6 col-md-3"><div class="card text-center p-2"><div class="fw-bold fs-5" id="ss1">0</div><div class="text-muted small">Assignments</div></div></div>
+        <div class="col-6 col-md-3"><div class="card text-center p-2"><div class="fw-bold fs-5" id="ss2">0</div><div class="text-muted small">Employees</div></div></div>
+        <div class="col-6 col-md-3"><div class="card text-center p-2"><div class="fw-bold fs-5 text-warning" id="ss3">0</div><div class="text-muted small">Conflicts</div></div></div>
+        <div class="col-6 col-md-3"><div class="card text-center p-2"><div class="fw-bold fs-5 text-danger" id="ss4">0</div><div class="text-muted small">Unfilled</div></div></div>
+      </div>
+
+      <!-- Conflict alert -->
+      <div id="conflictAlert" class="alert alert-warning d-none mb-3">
+        <strong><i class="bi bi-exclamation-triangle me-2"></i>Conflicts Detected & Auto-Resolved</strong>
+        <ul class="conflict-list mt-2 mb-0" id="conflictList"></ul>
+      </div>
+
+      <!-- AI insights -->
+      <div id="insightAlert" class="alert alert-info d-none mb-3">
+        <strong><i class="bi bi-robot me-2"></i>AI Learning Insights</strong>
+        <ul class="mt-2 mb-0 small" id="insightList"></ul>
+      </div>
+
+      <!-- Calendar view -->
+      <div id="calendarView">
+        <div class="card">
+          <div class="card-body p-2" id="calendarContainer">
+            <div id="fcCalendar"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table view -->
+      <div id="tableView" style="display:none">
+        <div class="card">
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0" id="schedTable">
+                <thead>
+                  <tr>
+                    <th>Date</th><th>Employee</th><th>Dept</th>
+                    <th>Shift</th><th>Score</th><th>Reason</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="schedTbody">
+                  <tr><td colspan="7" class="text-center py-5 text-muted">
+                    <i class="bi bi-calendar-x fs-2 d-block mb-2"></i>
+                    No schedule loaded. Set parameters and click <strong>Generate Schedule</strong>.
+                  </td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Override Modal -->
+<div class="modal fade" id="overrideModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title fw-bold"><i class="bi bi-pencil-square me-2"></i>Manual Override</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Employee</label>
+          <select class="form-select form-select-sm" id="overrideEmployee"></select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Department</label>
+          <select class="form-select form-select-sm" id="overrideDept"></select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Shift</label>
+          <select class="form-select form-select-sm" id="overrideShift"></select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Date</label>
+          <input type="date" class="form-control form-control-sm" id="overrideDate" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Reason</label>
+          <input type="text" class="form-control form-control-sm" id="overrideReason" value="Manual override by manager" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveOverride()">Save Override</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let _calendar = null;
+let _currentSchedules = [];
+let _departments = [];
+let _employees = [];
+let _shifts = [];
+let _currentDomain = getActiveDomain();
+let _lastBatchId = null;
+let _viewMode = 'calendar';
+
+// ── Init ───────────────────────────────────────────────────────────────────
+
+async function init(domain) {
+  _currentDomain = domain;
+  [_departments, _employees, _shifts] = await Promise.all([
+    DepartmentAPI.list({ roster_type: domain }),
+    EmployeeAPI.list({ roster_type: domain }),
+    ShiftAPI.list({ roster_type: domain }),
+  ]);
+  renderDeptChecks();
+  populateOverrideSelects();
+  initCalendar();
+  loadExistingSchedules();
+}
+
+function renderDeptChecks() {
+  document.getElementById('deptChecks').innerHTML = _departments.map(d => `
+    <label class="d-flex align-items-center gap-2 cursor-pointer">
+      <input type="checkbox" class="dept-check" value="${d.id}" checked />
+      <span>${d.name}</span>
+    </label>
+  `).join('');
+}
+
+function getSelectedDeptIds() {
+  return Array.from(document.querySelectorAll('.dept-check:checked')).map(el => parseInt(el.value));
+}
+
+// ── Calendar ───────────────────────────────────────────────────────────────
+
+function initCalendar() {
+  const el = document.getElementById('fcCalendar');
+  if (!el) return;
+  if (_calendar) _calendar.destroy();
+  _calendar = new FullCalendar.Calendar(el, {
+    initialView: 'dayGridMonth',
+    headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listWeek' },
+    height: 620,
+    eventClick: info => showEventDetail(info.event),
+    events: [],
+  });
+  _calendar.render();
+}
+
+function renderCalendar(schedules) {
+  if (!_calendar) return;
+  _calendar.removeAllEvents();
+  const shiftMap = {};
+  _shifts.forEach(s => shiftMap[s.shift_key] = s);
+  const events = schedules.map(s => ({
+    id: s.id,
+    title: `${s.employee_name.split(' ').slice(-1)[0]} – ${s.shift_name || s.shift_key}`,
+    start: s.date,
+    color: shiftMap[s.shift_key]?.color_hex || '#3b82f6',
+    extendedProps: s,
+  }));
+  _calendar.addEventSource(events);
+}
+
+function showEventDetail(event) {
+  const s = event.extendedProps;
+  showToast(
+    `<b>${s.employee_name}</b> → ${s.department_name} (${s.shift_name || s.shift_key})<br><small>${s.reason}</small>`,
+    'info'
+  );
+}
+
+// ── Generate ───────────────────────────────────────────────────────────────
+
+async function generateSchedule() {
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
+  if (!start || !end) { showToast('Please set start and end dates.', 'warning'); return; }
+
+  const deptIds = getSelectedDeptIds();
+  showLoading('AI engine scheduling — running all agents…');
+  const btn = document.getElementById('btnGenerate');
+  btn.disabled = true;
+
+  try {
+    const result = await ScheduleAPI.generate({
+      roster_type: _currentDomain,
+      start_date: start,
+      end_date: end,
+      department_ids: deptIds.length ? deptIds : null,
+    });
+    _lastBatchId = result.batch_id;
+    showToast(`Schedule generated! ${result.stats.total_assignments} assignments.`, 'success');
+    displayResult(result);
+  } catch (err) {
+    showToast('Generation failed: ' + err.message, 'danger');
+  } finally {
+    hideLoading();
+    btn.disabled = false;
+  }
+}
+
+async function runSimulation() {
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
+  if (!start || !end) { showToast('Please set start and end dates.', 'warning'); return; }
+
+  showLoading('Running what-if simulation (not saving)…');
+  try {
+    const result = await SimulationAPI.run({
+      roster_type: _currentDomain,
+      start_date: start,
+      end_date: end,
+      department_ids: getSelectedDeptIds() || null,
+    });
+    result.is_simulation = true;
+    showToast(`Simulation complete. ${result.stats.total_assignments} assignments (not saved).`, 'info');
+    displayResult(result);
+  } catch (err) {
+    showToast('Simulation failed: ' + err.message, 'danger');
+  } finally {
+    hideLoading();
+  }
+}
+
+function displayResult(result) {
+  _currentSchedules = result.assignments || [];
+  const stats = result.stats || {};
+
+  // Stats strip
+  const strip = document.getElementById('schedStatsRow');
+  strip.style.removeProperty('display');
+  document.getElementById('ss1').textContent = stats.total_assignments || 0;
+  document.getElementById('ss2').textContent = stats.employees_scheduled || 0;
+  document.getElementById('ss3').textContent = stats.total_conflicts || 0;
+  document.getElementById('ss4').textContent = stats.unfilled_slots || 0;
+
+  // Conflicts
+  const conflicts = result.conflicts || [];
+  const conflictAlert = document.getElementById('conflictAlert');
+  if (conflicts.length) {
+    conflictAlert.classList.remove('d-none');
+    document.getElementById('conflictList').innerHTML = conflicts.slice(0, 10).map(c =>
+      `<li><b>${c.type}</b>: ${c.description} <em class="text-success">(${c.note || 'resolved'})</em></li>`
+    ).join('');
+  } else {
+    conflictAlert.classList.add('d-none');
+  }
+
+  // Insights
+  const insights = result.learning_insights || [];
+  const insightAlert = document.getElementById('insightAlert');
+  if (insights.length) {
+    insightAlert.classList.remove('d-none');
+    document.getElementById('insightList').innerHTML = insights.map(i => `<li>${i}</li>`).join('');
+  } else {
+    insightAlert.classList.add('d-none');
+  }
+
+  renderCalendar(_currentSchedules);
+  renderTable(_currentSchedules);
+}
+
+async function loadExistingSchedules() {
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
+  if (!start || !end) return;
+  try {
+    const schedules = await ScheduleAPI.list({ roster_type: _currentDomain, start_date: start, end_date: end });
+    _currentSchedules = schedules;
+    renderCalendar(schedules);
+    renderTable(schedules);
+  } catch {}
+}
+
+// ── Table View ─────────────────────────────────────────────────────────────
+
+function renderTable(schedules) {
+  const tbody = document.getElementById('schedTbody');
+  if (!schedules.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No assignments to display.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = schedules.map(s => `
+    <tr>
+      <td>${formatDate(s.date)}</td>
+      <td><div class="fw-semibold">${s.employee_name}</div><small class="text-muted">${s.role}</small></td>
+      <td>${s.department_name}</td>
+      <td>${shiftBadge(s.shift_key, s.shift_name)}</td>
+      <td>${scoreBar(s.ai_score)}</td>
+      <td class="reason-cell" title="${s.reason}">${s.reason}</td>
+      <td>
+        ${s.id ? `
+          <div class="d-flex gap-1">
+            <button class="btn btn-xs btn-outline-success p-1" title="Confirm" onclick="confirmAssignment(${s.id})"><i class="bi bi-check-lg"></i></button>
+            <button class="btn btn-xs btn-outline-danger p-1" title="Delete" onclick="deleteAssignment(${s.id})"><i class="bi bi-trash"></i></button>
+          </div>
+        ` : ''}
+      </td>
+    </tr>
+  `).join('');
+}
+
+function setView(mode) {
+  _viewMode = mode;
+  document.getElementById('calendarView').style.display = mode === 'calendar' ? '' : 'none';
+  document.getElementById('tableView').style.display    = mode === 'table'    ? '' : 'none';
+  document.getElementById('btnCalView').classList.toggle('active', mode === 'calendar');
+  document.getElementById('btnTableView').classList.toggle('active', mode === 'table');
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+
+async function confirmAssignment(id) {
+  try { await ScheduleAPI.confirm(id); showToast('Assignment confirmed.', 'success'); } catch (e) { showToast(e.message, 'danger'); }
+}
+
+async function deleteAssignment(id) {
+  if (!await confirmDialog('Delete this assignment?')) return;
+  try {
+    await ScheduleAPI.delete(id);
+    _currentSchedules = _currentSchedules.filter(s => s.id !== id);
+    renderCalendar(_currentSchedules);
+    renderTable(_currentSchedules);
+    showToast('Assignment deleted.', 'success');
+  } catch (e) { showToast(e.message, 'danger'); }
+}
+
+// ── Override ───────────────────────────────────────────────────────────────
+
+function populateOverrideSelects() {
+  document.getElementById('overrideEmployee').innerHTML = _employees.map(e =>
+    `<option value="${e.id}">${e.name} (${e.role})</option>`).join('');
+  document.getElementById('overrideDept').innerHTML = _departments.map(d =>
+    `<option value="${d.id}">${d.name}</option>`).join('');
+  document.getElementById('overrideShift').innerHTML = _shifts.map(s =>
+    `<option value="${s.shift_key}">${s.name}</option>`).join('');
+  document.getElementById('overrideDate').value = todayISO();
+}
+
+async function saveOverride() {
+  const payload = {
+    employee_id: parseInt(document.getElementById('overrideEmployee').value),
+    department_id: parseInt(document.getElementById('overrideDept').value),
+    shift_key: document.getElementById('overrideShift').value,
+    schedule_date: document.getElementById('overrideDate').value,
+    roster_type: _currentDomain,
+    reason: document.getElementById('overrideReason').value,
+  };
+  try {
+    await ScheduleAPI.override(payload);
+    bootstrap.Modal.getInstance(document.getElementById('overrideModal'))?.hide();
+    showToast('Manual override saved.', 'success');
+    loadExistingSchedules();
+  } catch (e) { showToast(e.message, 'danger'); }
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+
+function exportCSV() {
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
+  if (!start || !end) { showToast('Set date range first.', 'warning'); return; }
+  window.location.href = ScheduleAPI.exportCsvUrl({ roster_type: _currentDomain, start_date: start, end_date: end });
+}
+function exportExcel() {
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
+  if (!start || !end) { showToast('Set date range first.', 'warning'); return; }
+  window.location.href = ScheduleAPI.exportExcelUrl({ roster_type: _currentDomain, start_date: start, end_date: end });
+}
+
+// ── Bootstrap ──────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Default dates: today → +6 days
+  const today = todayISO();
+  document.getElementById('startDate').value = today;
+  document.getElementById('endDate').value   = addDays(today, 6);
+  init(getActiveDomain());
+});
+
+window.addEventListener('domainChanged', e => init(e.detail.domain));
+</script>
+{% endblock %}

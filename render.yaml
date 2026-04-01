@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ai-roster-system
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -k uvicorn.workers.UvicornWorker "app:create_app()" --bind 0.0.0.0:$PORT --timeout 120
+    healthCheckPath: /api/docs
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: roster-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEMO_EMAIL
+        value: demo@roster.app
+      - key: DEMO_PASSWORD
+        value: demo1234
+      - key: DEMO_FULL_NAME
+        value: Demo User
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+databases:
+  - name: roster-db
+    plan: free
+    region: singapore

@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Employees – AI Roster System{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-people me-2"></i>Employees</h4>
+    <button class="btn btn-generate" onclick="openAddModal()">
+      <i class="bi bi-person-plus me-2"></i>Add Employee
+    </button>
+  </div>
+
+  <!-- Filters -->
+  <div class="card mb-3">
+    <div class="card-body py-2 px-3 d-flex flex-wrap gap-3 align-items-center">
+      <div>
+        <label class="form-label small mb-1">Role</label>
+        <select class="form-select form-select-sm" id="filterRole" onchange="loadEmployees()" style="min-width:140px">
+          <option value="">All Roles</option>
+        </select>
+      </div>
+      <div class="form-check mt-3">
+        <input class="form-check-input" type="checkbox" id="activeOnly" checked onchange="loadEmployees()" />
+        <label class="form-check-label small">Active only</label>
+      </div>
+      <div class="ms-auto">
+        <input type="text" class="form-control form-control-sm" id="searchInput" placeholder="Search name…" oninput="filterTable()" style="min-width:200px" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>#</th><th>Name</th><th>Role</th><th>Skills</th>
+              <th>Max Shifts/Wk</th><th>Experience</th><th>Status</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="empTbody">
+            <tr><td colspan="8" class="text-center py-5 text-muted">Loading employees…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Modal -->
+<div class="modal fade" id="empModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title fw-bold" id="empModalTitle">Add Employee</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Full Name *</label>
+            <input type="text" class="form-control form-control-sm" id="empName" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold">Email *</label>
+            <input type="email" class="form-control form-control-sm" id="empEmail" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">Role *</label>
+            <select class="form-select form-select-sm" id="empRole"></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">Max Shifts / Week</label>
+            <input type="number" class="form-control form-control-sm" id="empMaxShifts" min="1" max="7" value="5" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">Experience (Years)</label>
+            <input type="number" class="form-control form-control-sm" id="empExp" min="0" step="0.5" value="1.0" />
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold">Skills (comma-separated)</label>
+            <input type="text" class="form-control form-control-sm" id="empSkills" placeholder="Python, Docker, AWS" />
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold">Availability</label>
+            <div class="d-flex flex-wrap gap-2" id="availChecks"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveEmployee()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const ROLES_MEDICAL = ['doctor','nurse','intern'];
+const ROLES_IT = ['developer','qa','devops','support'];
+const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+let _allEmployees = [];
+let _editId = null;
+
+async function loadEmployees() {
+  const domain = getActiveDomain();
+  const role = document.getElementById('filterRole').value;
+  const activeOnly = document.getElementById('activeOnly').checked;
+  try {
+    _allEmployees = await EmployeeAPI.list({ roster_type: domain, role: role || undefined, active_only: activeOnly });
+    renderTable(_allEmployees);
+    updateRoleFilter(domain);
+  } catch (e) { showToast(e.message, 'danger'); }
+}
+
+function updateRoleFilter(domain) {
+  const roles = domain === 'medical' ? ROLES_MEDICAL : ROLES_IT;
+  const sel = document.getElementById('filterRole');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Roles</option>' + roles.map(r => `<option value="${r}" ${r===cur?'selected':''}>${r}</option>`).join('');
+}
+
+function renderTable(employees) {
+  const tbody = document.getElementById('empTbody');
+  if (!employees.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-5 text-muted">No employees found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = employees.map((e, i) => `
+    <tr>
+      <td class="text-muted small">${i + 1}</td>
+      <td>
+        <div class="fw-semibold">${e.name}</div>
+        <small class="text-muted">${e.email}</small>
+      </td>
+      <td><span class="badge bg-secondary">${e.role}</span></td>
+      <td>${e.skills.slice(0,3).map(s=>`<span class="badge bg-light text-dark border me-1">${s}</span>`).join('')}${e.skills.length>3?`<small class="text-muted">+${e.skills.length-3}</small>`:''}</td>
+      <td class="text-center">${e.max_shifts_per_week}</td>
+      <td>${e.experience_years}y</td>
+      <td><span class="badge ${e.is_active?'bg-success':'bg-danger'}">${e.is_active?'Active':'Inactive'}</span></td>
+      <td>
+        <div class="d-flex gap-1">
+          <button class="btn btn-xs btn-outline-primary p-1" onclick="openEditModal(${e.id})"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-xs btn-outline-danger p-1" onclick="removeEmployee(${e.id})"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterTable() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const filtered = _allEmployees.filter(e => e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q));
+  renderTable(filtered);
+}
+
+function openAddModal() {
+  _editId = null;
+  document.getElementById('empModalTitle').textContent = 'Add Employee';
+  document.getElementById('empName').value = '';
+  document.getElementById('empEmail').value = '';
+  document.getElementById('empMaxShifts').value = 5;
+  document.getElementById('empExp').value = 1.0;
+  document.getElementById('empSkills').value = '';
+  populateRoleSelect();
+  renderAvailChecks({});
+  new bootstrap.Modal(document.getElementById('empModal')).show();
+}
+
+async function openEditModal(id) {
+  _editId = id;
+  const emp = await EmployeeAPI.get(id);
+  document.getElementById('empModalTitle').textContent = 'Edit Employee';
+  document.getElementById('empName').value = emp.name;
+  document.getElementById('empEmail').value = emp.email;
+  document.getElementById('empMaxShifts').value = emp.max_shifts_per_week;
+  document.getElementById('empExp').value = emp.experience_years;
+  document.getElementById('empSkills').value = emp.skills.join(', ');
+  populateRoleSelect(emp.role);
+  renderAvailChecks(emp.availability);
+  new bootstrap.Modal(document.getElementById('empModal')).show();
+}
+
+function populateRoleSelect(selected = '') {
+  const domain = getActiveDomain();
+  const roles = domain === 'medical' ? ROLES_MEDICAL : ROLES_IT;
+  document.getElementById('empRole').innerHTML = roles.map(r =>
+    `<option value="${r}" ${r===selected?'selected':''}>${r}</option>`).join('');
+}
+
+function renderAvailChecks(avail) {
+  document.getElementById('availChecks').innerHTML = DAYS.map(d => `
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="avail_${d}" value="${d}" ${avail[d]!==false?'checked':''} />
+      <label class="form-check-label small" for="avail_${d}">${d.slice(0,3)}</label>
+    </div>
+  `).join('');
+}
+
+async function saveEmployee() {
+  const avail = {};
+  DAYS.forEach(d => { avail[d] = document.getElementById(`avail_${d}`).checked; });
+  const skills = document.getElementById('empSkills').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const data = {
+    name: document.getElementById('empName').value.trim(),
+    email: document.getElementById('empEmail').value.trim(),
+    role: document.getElementById('empRole').value,
+    roster_type: getActiveDomain(),
+    max_shifts_per_week: parseInt(document.getElementById('empMaxShifts').value),
+    experience_years: parseFloat(document.getElementById('empExp').value),
+    skills, availability: avail,
+  };
+  if (!data.name || !data.email) { showToast('Name and email are required.', 'warning'); return; }
+  try {
+    if (_editId) { await EmployeeAPI.update(_editId, data); showToast('Employee updated.', 'success'); }
+    else { await EmployeeAPI.create(data); showToast('Employee added.', 'success'); }
+    bootstrap.Modal.getInstance(document.getElementById('empModal'))?.hide();
+    loadEmployees();
+  } catch (e) { showToast(e.message, 'danger'); }
+}
+
+async function removeEmployee(id) {
+  if (!await confirmDialog('Deactivate this employee?')) return;
+  try { await EmployeeAPI.delete(id); showToast('Employee deactivated.', 'success'); loadEmployees(); }
+  catch (e) { showToast(e.message, 'danger'); }
+}
+
+document.addEventListener('DOMContentLoaded', loadEmployees);
+window.addEventListener('domainChanged', () => { loadEmployees(); });
+</script>
+{% endblock %}

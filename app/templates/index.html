@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – AI Roster System{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h4 class="mb-0 fw-bold">Dashboard</h4>
+      <p class="text-muted small mb-0" id="dashSubtitle">Loading roster data…</p>
+    </div>
+    <a href="/schedule" class="btn btn-generate">
+      <i class="bi bi-magic me-2"></i>Generate Schedule
+    </a>
+  </div>
+
+  <!-- Stat Row -->
+  <div class="row g-3 mb-4" id="statsRow">
+    <div class="col-6 col-md-3 fade-in fade-in-delay-1">
+      <div class="stat-card stat-blue">
+        <i class="bi bi-people-fill stat-icon"></i>
+        <div>
+          <div class="stat-value" id="statEmployees">—</div>
+          <div class="stat-label">Active Employees</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3 fade-in fade-in-delay-2">
+      <div class="stat-card stat-green">
+        <i class="bi bi-building stat-icon"></i>
+        <div>
+          <div class="stat-value" id="statDepts">—</div>
+          <div class="stat-label">Departments</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3 fade-in fade-in-delay-3">
+      <div class="stat-card stat-orange">
+        <i class="bi bi-calendar-check stat-icon"></i>
+        <div>
+          <div class="stat-value" id="statSchedules">—</div>
+          <div class="stat-label">Shifts This Week</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3 fade-in fade-in-delay-4">
+      <div class="stat-card stat-purple">
+        <i class="bi bi-robot stat-icon"></i>
+        <div>
+          <div class="stat-value" id="statAvgScore">—</div>
+          <div class="stat-label">Avg AI Score</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-7 fade-in fade-in-delay-1">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-bar-chart me-2"></i>Employee Workload (Last 30 Days)</span>
+        </div>
+        <div class="card-body">
+          <canvas id="workloadChart" height="220"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-5 fade-in fade-in-delay-2">
+      <div class="card h-100">
+        <div class="card-header">
+          <i class="bi bi-pie-chart me-2"></i>Shift Type Distribution
+        </div>
+        <div class="card-body d-flex align-items-center justify-content-center">
+          <canvas id="shiftDistChart" height="220"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Assignments -->
+  <div class="card fade-in">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-clock-history me-2"></i>Recent Assignments</span>
+      <a href="/schedule" class="btn btn-sm btn-outline-primary">View All</a>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0" id="recentTable">
+          <thead>
+            <tr>
+              <th>Date</th><th>Employee</th><th>Department</th>
+              <th>Shift</th><th>AI Score</th><th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="recentTbody"><tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/charts.js"></script>
+<script>
+let _workloadChart = null, _shiftChart = null;
+
+async function loadDashboard(domain) {
+  document.getElementById('dashSubtitle').textContent = `Showing ${domain.toUpperCase()} roster — ${new Date().toLocaleDateString('en-IN',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}`;
+
+  try {
+    const [employees, departments, shifts] = await Promise.all([
+      EmployeeAPI.list({ roster_type: domain }),
+      DepartmentAPI.list({ roster_type: domain }),
+      ShiftAPI.list({ roster_type: domain }),
+    ]);
+    document.getElementById('statEmployees').textContent = employees.length;
+    document.getElementById('statDepts').textContent = departments.length;
+
+    // Workload
+    const workload = await EmployeeAPI.workload({ roster_type: domain, days: 30 });
+    const weekShifts = workload.reduce((s, w) => s + w.shift_count, 0);
+    document.getElementById('statSchedules').textContent = weekShifts;
+
+    renderWorkloadChart(workload.slice(0, 10));
+
+    // Recent schedules
+    const today = todayISO();
+    const start = addDays(today, -14);
+    let schedules = [];
+    try {
+      schedules = await ScheduleAPI.list({ roster_type: domain, start_date: start, end_date: today });
+    } catch {}
+
+    // Avg AI score
+    const avg = schedules.length
+      ? (schedules.reduce((s, r) => s + (r.ai_score || 0), 0) / schedules.length * 100).toFixed(0) + '%'
+      : '—';
+    document.getElementById('statAvgScore').textContent = avg;
+
+    renderShiftDistChart(schedules, shifts);
+    renderRecentTable(schedules.slice(-15).reverse());
+
+  } catch (err) {
+    showToast('Dashboard load error: ' + err.message, 'danger');
+  }
+}
+
+function renderWorkloadChart(data) {
+  const ctx = document.getElementById('workloadChart').getContext('2d');
+  if (_workloadChart) _workloadChart.destroy();
+  _workloadChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d.name.split(' ').slice(-1)[0]),
+      datasets: [{
+        label: 'Shifts',
+        data: data.map(d => d.shift_count),
+        backgroundColor: data.map((_, i) => `hsl(${210 + i * 15}, 70%, ${55 + i * 2}%)`),
+        borderRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+    },
+  });
+}
+
+function renderShiftDistChart(schedules, shifts) {
+  const counts = {};
+  schedules.forEach(s => { counts[s.shift_key] = (counts[s.shift_key] || 0) + 1; });
+  const shiftMap = {};
+  shifts.forEach(s => shiftMap[s.shift_key] = s);
+  const keys = Object.keys(counts);
+  const ctx = document.getElementById('shiftDistChart').getContext('2d');
+  if (_shiftChart) _shiftChart.destroy();
+  _shiftChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: keys.map(k => shiftMap[k]?.name || k),
+      datasets: [{
+        data: keys.map(k => counts[k]),
+        backgroundColor: keys.map(k => shiftMap[k]?.color_hex || '#3b82f6'),
+        borderWidth: 2, borderColor: '#fff',
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+      cutout: '65%',
+    },
+  });
+}
+
+function renderRecentTable(schedules) {
+  const tbody = document.getElementById('recentTbody');
+  if (!schedules.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No recent schedules found. <a href="/schedule">Generate one!</a></td></tr>';
+    return;
+  }
+  tbody.innerHTML = schedules.map(s => `
+    <tr>
+      <td>${formatDate(s.date)}</td>
+      <td><strong>${s.employee_name}</strong> <small class="text-muted">${s.role}</small></td>
+      <td>${s.department_name}</td>
+      <td>${shiftBadge(s.shift_key, s.shift_name)}</td>
+      <td>${scoreBar(s.ai_score)}</td>
+      <td class="reason-cell" title="${s.reason}">${s.reason}</td>
+    </tr>
+  `).join('');
+}
+
+window.addEventListener('domainChanged', e => loadDashboard(e.detail.domain));
+document.addEventListener('DOMContentLoaded', () => loadDashboard(getActiveDomain()));
+</script>
+{% endblock %}

@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% block title %}Departments – AI Roster System{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h4 class="fw-bold mb-0"><i class="bi bi-building me-2"></i>Departments</h4>
+      <p class="text-muted small mb-0" id="deptSubtitle">Loading…</p>
+    </div>
+    <button class="btn btn-generate" onclick="openAddModal()">
+      <i class="bi bi-plus-circle me-2"></i>Add Department
+    </button>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="card mb-3">
+    <div class="card-body py-2 px-3 d-flex flex-wrap gap-3 align-items-center">
+      <div class="d-flex gap-2" role="group" aria-label="Filter departments">
+        <button class="btn btn-sm btn-outline-secondary" id="filterAll"    onclick="setFilter('all')">All</button>
+        <button class="btn btn-sm btn-success active"    id="filterActive" onclick="setFilter('active')">Active</button>
+        <button class="btn btn-sm btn-outline-danger"    id="filterInact"  onclick="setFilter('inactive')">Inactive</button>
+      </div>
+      <div class="ms-auto">
+        <label for="deptSearch" class="visually-hidden">Search departments</label>
+        <input type="text" class="form-control form-control-sm" id="deptSearch"
+               placeholder="Search departments…" oninput="filterCards()" style="min-width:200px" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Activation hint (medical only) -->
+  <div id="activationHint" class="alert alert-info py-2 d-none small">
+    <i class="bi bi-info-circle me-2"></i>
+    Use the toggle switch on each card to activate or deactivate a department.
+    Only <strong>active</strong> departments are included in schedule generation.
+  </div>
+
+  <!-- Cards grid -->
+  <div class="row g-3" id="deptCards">
+    <div class="col-12 text-center py-5 text-muted">
+      <div class="spinner-border spinner-border-sm me-2"></div>Loading departments…
+    </div>
+  </div>
+</div>
+
+<!-- ── Add / Edit Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="deptModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title fw-bold" id="deptModalTitle">Add Department</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label for="deptName" class="form-label small fw-semibold">Department Name *</label>
+            <input type="text" class="form-control form-control-sm" id="deptName" />
+          </div>
+          <div class="col-md-4">
+            <label for="deptPriority" class="form-label small fw-semibold">Rotation Priority (1–5)</label>
+            <input type="number" class="form-control form-control-sm" id="deptPriority" min="1" max="5" value="3" />
+          </div>
+          <div class="col-12">
+            <label for="deptDesc" class="form-label small fw-semibold">Description</label>
+            <input type="text" class="form-control form-control-sm" id="deptDesc" />
+          </div>
+          <div class="col-md-4">
+            <label for="deptStaffMorning" class="form-label small fw-semibold">Staff – Morning</label>
+            <input type="number" class="form-control form-control-sm" id="deptStaffMorning" min="0" value="2" />
+          </div>
+          <div class="col-md-4">
+            <label for="deptStaffEvening" class="form-label small fw-semibold">Staff – Evening</label>
+            <input type="number" class="form-control form-control-sm" id="deptStaffEvening" min="0" value="2" />
+          </div>
+          <div class="col-md-4">
+            <label for="deptStaffNight" class="form-label small fw-semibold">Staff – Night</label>
+            <input type="number" class="form-control form-control-sm" id="deptStaffNight" min="0" value="1" />
+          </div>
+          <div class="col-12">
+            <span class="form-label small fw-semibold d-block mb-1">Shift Types</span>
+            <div class="d-flex flex-wrap gap-2" id="shiftTypeChecks" role="group" aria-label="Shift types"></div>
+          </div>
+          <div class="col-12">
+            <label for="deptSkills" class="form-label small fw-semibold">Required Skills (comma-separated)</label>
+            <input type="text" class="form-control form-control-sm" id="deptSkills" placeholder="ICU, Critical Care" />
+          </div>
+          <div class="col-12" id="techStackRow">
+            <label for="deptTech" class="form-label small fw-semibold">Tech Stack (IT only)</label>
+            <input type="text" class="form-control form-control-sm" id="deptTech" placeholder="Python, Docker, AWS" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveDepartment()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const SHIFT_TYPES_MEDICAL = ['morning', 'evening', 'night', 'emergency'];
+const SHIFT_TYPES_IT      = ['general', 'night_support', 'on_call'];
+
+let _allDepts   = [];
+let _editDeptId = null;
+let _filter     = 'active';
+
+// ── Load ────────────────────────────────────────────────────────────────────
+
+async function loadDepartments() {
+  const domain = getActiveDomain();
+  document.getElementById('techStackRow').style.display = domain === 'it' ? '' : 'none';
+  document.getElementById('activationHint').classList.toggle('d-none', domain !== 'medical');
+  try {
+    _allDepts = await DepartmentAPI.listAll({ roster_type: domain });
+    const active = _allDepts.filter(d => d.is_active).length;
+    document.getElementById('deptSubtitle').textContent =
+      `${_allDepts.length} total \u2022 ${active} active \u2022 ${_allDepts.length - active} inactive`;
+    renderCards();
+  } catch (e) {
+    showToast(e.message, 'danger');
+  }
+}
+
+function setFilter(f) {
+  _filter = f;
+  document.getElementById('filterAll').className    = 'btn btn-sm btn-outline-secondary' + (f === 'all'      ? ' active' : '');
+  document.getElementById('filterActive').className = 'btn btn-sm btn-success'           + (f === 'active'   ? ' active' : ' btn-outline-success');
+  document.getElementById('filterInact').className  = 'btn btn-sm btn-outline-danger'    + (f === 'inactive' ? ' active' : '');
+  // Re-apply correct base classes
+  if (f === 'active')   document.getElementById('filterActive').className = 'btn btn-sm btn-success active';
+  if (f !== 'active')   document.getElementById('filterActive').className = 'btn btn-sm btn-outline-secondary';
+  if (f === 'inactive') document.getElementById('filterInact').className  = 'btn btn-sm btn-danger active';
+  if (f === 'all')      document.getElementById('filterAll').className    = 'btn btn-sm btn-secondary active';
+  renderCards();
+}
+
+function filterCards() { renderCards(); }
+
+// ── Render ──────────────────────────────────────────────────────────────────
+
+function renderCards() {
+  const q = (document.getElementById('deptSearch')?.value || '').toLowerCase();
+  const depts = _allDepts.filter(d => {
+    if (_filter === 'active'   && !d.is_active) return false;
+    if (_filter === 'inactive' &&  d.is_active) return false;
+    if (q && !d.name.toLowerCase().includes(q) && !(d.description || '').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const container = document.getElementById('deptCards');
+  if (!depts.length) {
+    container.innerHTML = '<div class="col-12 text-center py-5 text-muted">No departments match the current filter.</div>';
+    return;
+  }
+  container.innerHTML = depts.map(d => buildDeptCard(d)).join('');
+}
+
+function buildDeptCard(d) {
+  const domain = getActiveDomain();
+  const priorityColors = ['', 'bg-secondary', 'bg-info', 'bg-primary', 'bg-warning', 'bg-danger'];
+  const pColor = priorityColors[d.rotation_priority] || 'bg-secondary';
+
+  const staffParts = [];
+  if (d.required_staff_morning) staffParts.push('<span class="badge bg-warning text-dark"><i class="bi bi-sun me-1"></i>' + d.required_staff_morning + ' Morning</span>');
+  if (d.required_staff_evening) staffParts.push('<span class="badge text-white" style="background:#8b5cf6"><i class="bi bi-moon-stars me-1"></i>' + d.required_staff_evening + ' Evening</span>');
+  if (d.required_staff_night)   staffParts.push('<span class="badge bg-dark"><i class="bi bi-moon me-1"></i>' + d.required_staff_night + ' Night</span>');
+
+  const shiftParts  = (d.shift_types || []).map(s => '<span class="shift-badge shift-' + s + '">' + s + '</span>');
+  const skillParts  = (d.required_skills || []).map(s => '<span class="badge bg-light text-dark border me-1 mb-1">' + s + '</span>');
+  const techParts   = domain === 'it' ? (d.tech_stack || []).map(s => '<span class="badge bg-light text-primary border me-1 mb-1">' + s + '</span>') : [];
+
+  const inactiveBadge = d.is_active ? '' :
+    '<div class="mt-2"><span class="badge bg-danger-subtle text-danger border border-danger-subtle">' +
+    '<i class="bi bi-pause-circle me-1"></i>Inactive — excluded from scheduling</span></div>';
+
+  return [
+    '<div class="col-md-6 col-xl-4 fade-in">',
+    '  <div class="card h-100' + (d.is_active ? '' : ' border-secondary opacity-75') + '">',
+    '    <div class="card-body">',
+    '      <div class="d-flex justify-content-between align-items-start mb-1">',
+    '        <h6 class="fw-bold mb-0 flex-grow-1 me-2">' + d.name + '</h6>',
+    '        <div class="d-flex align-items-center gap-2">',
+    '          <span class="badge ' + pColor + '" title="Rotation priority P' + d.rotation_priority + '">P' + d.rotation_priority + '</span>',
+    '          <div class="form-check form-switch mb-0">',
+    '            <label class="form-check-label visually-hidden" for="toggle_' + d.id + '">' + (d.is_active ? 'Deactivate' : 'Activate') + ' ' + d.name + '</label>',
+    '            <input class="form-check-input" type="checkbox" role="switch" id="toggle_' + d.id + '" ' + (d.is_active ? 'checked' : '') + ' onchange="toggleDept(' + d.id + ', this)" style="cursor:pointer;width:2.4em;height:1.2em">',
+    '          </div>',
+    '        </div>',
+    '      </div>',
+    '      <p class="text-muted small mb-2">' + (d.description || 'No description.') + '</p>',
+    '      <div class="d-flex flex-wrap gap-1 mb-2">' + staffParts.join('') + '</div>',
+    '      <div class="d-flex gap-1 flex-wrap mb-2">' + shiftParts.join('') + '</div>',
+    skillParts.length ? '      <div class="mb-1">' + skillParts.join('') + '</div>' : '',
+    techParts.length  ? '      <div class="mb-1">' + techParts.join('')  + '</div>' : '',
+    inactiveBadge,
+    '    </div>',
+    '    <div class="card-footer bg-transparent d-flex gap-2 pt-0">',
+    '      <button class="btn btn-sm btn-outline-primary flex-grow-1" onclick="openEditModal(' + d.id + ')"><i class="bi bi-pencil me-1"></i>Edit</button>',
+    '      <button class="btn btn-sm btn-outline-danger" onclick="removeDept(' + d.id + ')" aria-label="Delete ' + d.name + '"><i class="bi bi-trash"></i></button>',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n');
+}
+
+// ── Toggle active / inactive ────────────────────────────────────────────────
+
+async function toggleDept(id, checkbox) {
+  checkbox.disabled = true;
+  try {
+    const updated = await DepartmentAPI.toggle(id);
+    const idx = _allDepts.findIndex(d => d.id === id);
+    if (idx !== -1) _allDepts[idx] = updated;
+    renderCards();
+    const state = updated.is_active ? 'activated' : 'deactivated';
+    showToast(updated.name + ' ' + state + '.', updated.is_active ? 'success' : 'warning');
+    const active = _allDepts.filter(d => d.is_active).length;
+    document.getElementById('deptSubtitle').textContent =
+      `${_allDepts.length} total \u2022 ${active} active \u2022 ${_allDepts.length - active} inactive`;
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    showToast(e.message, 'danger');
+  } finally {
+    checkbox.disabled = false;
+  }
+}
+
+// ── Add / Edit ──────────────────────────────────────────────────────────────
+
+function renderShiftTypeChecks(selected) {
+  const types = getActiveDomain() === 'medical' ? SHIFT_TYPES_MEDICAL : SHIFT_TYPES_IT;
+  document.getElementById('shiftTypeChecks').innerHTML = types.map(t => [
+    '<div class="form-check form-check-inline">',
+    '  <input class="form-check-input" type="checkbox" id="st_' + t + '" value="' + t + '" ' + (selected.includes(t) ? 'checked' : '') + '>',
+    '  <label class="form-check-label small" for="st_' + t + '">' + t + '</label>',
+    '</div>',
+  ].join('')).join('');
+}
+
+function openAddModal() {
+  _editDeptId = null;
+  document.getElementById('deptModalTitle').textContent = 'Add Department';
+  ['deptName', 'deptDesc', 'deptSkills', 'deptTech'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('deptPriority').value      = 3;
+  document.getElementById('deptStaffMorning').value  = 2;
+  document.getElementById('deptStaffEvening').value  = 2;
+  document.getElementById('deptStaffNight').value    = 1;
+  const domain = getActiveDomain();
+  renderShiftTypeChecks(domain === 'medical' ? ['morning', 'evening', 'night'] : ['general']);
+  document.getElementById('techStackRow').style.display = domain === 'it' ? '' : 'none';
+  new bootstrap.Modal(document.getElementById('deptModal')).show();
+}
+
+async function openEditModal(id) {
+  _editDeptId = id;
+  const d = await DepartmentAPI.get(id);
+  document.getElementById('deptModalTitle').textContent  = 'Edit Department';
+  document.getElementById('deptName').value              = d.name;
+  document.getElementById('deptDesc').value              = d.description || '';
+  document.getElementById('deptPriority').value          = d.rotation_priority;
+  document.getElementById('deptStaffMorning').value      = d.required_staff_morning;
+  document.getElementById('deptStaffEvening').value      = d.required_staff_evening;
+  document.getElementById('deptStaffNight').value        = d.required_staff_night;
+  document.getElementById('deptSkills').value            = d.required_skills.join(', ');
+  document.getElementById('deptTech').value              = (d.tech_stack || []).join(', ');
+  renderShiftTypeChecks(d.shift_types);
+  document.getElementById('techStackRow').style.display = getActiveDomain() === 'it' ? '' : 'none';
+  new bootstrap.Modal(document.getElementById('deptModal')).show();
+}
+
+async function saveDepartment() {
+  const shiftTypes = Array.from(document.querySelectorAll('[id^="st_"]:checked')).map(el => el.value);
+  const data = {
+    name:                    document.getElementById('deptName').value.trim(),
+    description:             document.getElementById('deptDesc').value.trim(),
+    roster_type:             getActiveDomain(),
+    rotation_priority:       Number.parseInt(document.getElementById('deptPriority').value, 10),
+    required_staff_morning:  Number.parseInt(document.getElementById('deptStaffMorning').value, 10),
+    required_staff_evening:  Number.parseInt(document.getElementById('deptStaffEvening').value, 10),
+    required_staff_night:    Number.parseInt(document.getElementById('deptStaffNight').value, 10),
+    shift_types:             shiftTypes,
+    required_skills:         document.getElementById('deptSkills').value.split(',').map(s => s.trim()).filter(Boolean),
+    tech_stack:              document.getElementById('deptTech').value.split(',').map(s => s.trim()).filter(Boolean),
+  };
+  if (!data.name) { showToast('Department name is required.', 'warning'); return; }
+  try {
+    if (_editDeptId) {
+      await DepartmentAPI.update(_editDeptId, data);
+      showToast('Department updated.', 'success');
+    } else {
+      await DepartmentAPI.create(data);
+      showToast('Department added.', 'success');
+    }
+    bootstrap.Modal.getInstance(document.getElementById('deptModal'))?.hide();
+    loadDepartments();
+  } catch (e) {
+    showToast(e.message, 'danger');
+  }
+}
+
+async function removeDept(id) {
+  if (!await confirmDialog('Delete this department permanently?')) return;
+  try {
+    await DepartmentAPI.delete(id);
+    showToast('Department deleted.', 'success');
+    loadDepartments();
+  } catch (e) {
+    showToast(e.message, 'danger');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => { setFilter('active'); loadDepartments(); });
+globalThis.addEventListener('domainChanged', loadDepartments);
+</script>
+{% endblock %}
