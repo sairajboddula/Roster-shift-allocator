@@ -5,6 +5,7 @@ services:
     region: singapore
     plan: free
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: python -c "from app.db.database import init_db; from app.db.seed import seed_all; init_db(); seed_all()"
     startCommand: gunicorn -w 2 -k uvicorn.workers.UvicornWorker "app:create_app()" --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /api/docs
     envVars:
